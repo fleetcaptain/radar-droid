@@ -67,8 +67,8 @@ except:
 app_folder_directory = sys.argv[1]
 app_folders = []
 for name in os.listdir(app_folder_directory):
-            if os.path.isdir(os.path.join(a_dir, name)):
-		app_folders.append(a_dir + name)
+            if os.path.isdir(os.path.join(app_folder_directory, name)):
+		app_folders.append(app_folder_directory + name)
 		if (debug):
 			print "Added app " + name + " to analysis list"
 
