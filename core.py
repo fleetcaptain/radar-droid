@@ -60,16 +60,16 @@ def auditElement(xmldocument, search_tag):
 try:
 	debug = sys.argv[2]
 except:
-	continue
+	pass
 
 # input - a folder path. Inside this folder should be app files decompiled with jadx
 
 app_folder_directory = sys.argv[1]
 app_folders = []
-for name in os.listdir(a_dir):
+for name in os.listdir(app_folder_directory):
             if os.path.isdir(os.path.join(a_dir, name)):
 		app_folders.append(a_dir + name)
-		if (debug)
+		if (debug):
 			print "Added app " + name + " to analysis list"
 
 for app_folder in app_folders:
@@ -199,4 +199,3 @@ for app_folder in app_folders:
 	print ''
 
 print "\nDone"
-
