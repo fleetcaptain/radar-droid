@@ -6,11 +6,12 @@
 # TODO - make script decompiler-agnostic. Currently only works with jadx output since we look for a ./resources/ folder in the app directory
 # unknown if other decompilers make the same output structure
 
-import sys, os, json, re, optparse
+import sys, os, json, re
 from subprocess import check_call,CalledProcessError      
 from xml.dom import minidom
 from os import listdir
 from os.path import isfile, join
+from optparse import OptionParser
 
 rules = {}
 blacklist = ['.jpg', '.png', '.gif', '.tiff']
@@ -55,22 +56,42 @@ def auditElement(xmldocument, search_tag):
 
 
 # Start main code
+parser = OptionParser('Usage: core.py -i <directory with decompiled app folders> -')
+parser.add_option("-i", "--input", dest="input_dir", help="Directory with decompiled apk files")
+parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
+parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
+parser.add_option("--secrets", dest="scan_secrets", action="store_true", help="Search for API keys, tokens, and other sensitive data")
 
-# sys.argv calls temporary, will convert to optparse at some point
-try:
-	debug = sys.argv[2]
-except:
-	pass
+(options, args) = parser.parse_args()
+app_folder_directory = options.input_dir
+out_file = options.out_file
+debug = options.debug
+scan_secrets = options.scan_secrets
 
-# input - a folder path. Inside this folder should be app files decompiled with jadx
+#print 'Usage: core.py [directory with decompiled app folders] [debug true or false]'
 
-app_folder_directory = sys.argv[1]
+# input - a folder path. Inside this folder should be app files decompiled with apktool
+if (app_folder_directory == None):
+	print 'You must specify an input directory'
+	print parser.usage
+	exit()
+
 app_folders = []
 for name in os.listdir(app_folder_directory):
             if os.path.isdir(os.path.join(app_folder_directory, name)):
 		app_folders.append(app_folder_directory + name)
 		if (debug):
 			print "Added app " + name + " to analysis list"
+
+if (scan_secrets):
+	# read in regex rules
+	rule_file = open('./regex_rules.json', 'r')
+	rules = json.loads(rule_file.read())
+	for rule in rules:
+		if (debug):
+			print '[debug] Regex rule: ' + rule + " " + rules[rule]
+		rules[rule] = re.compile(rules[rule])
+	rule_file.close()
 
 for app_folder in app_folders:
 	path = app_folder + "/"
@@ -83,12 +104,12 @@ for app_folder in app_folders:
 	# - exported providers
 	# - exported services
 
-	xmldoc = minidom.parse(path + 'resources/AndroidManifest.xml')
-	print '\n##############################'
-	print '## Results for ' + xmldoc.getElementsByTagName('manifest')[0].attributes['package'].value
-	print '##############################'
+	xmldoc = minidom.parse(path + 'AndroidManifest.xml')
+	print '\n-------------------------------------'
+	print '-- Results for ' + xmldoc.getElementsByTagName('manifest')[0].attributes['package'].value
+	print ''#print '##############################'
 
-	print '\n-- Misc Info --'
+	print '-- Misc Info --'
 	# target SDK
 	uses_sdk = xmldoc.getElementsByTagName('uses-sdk')
 	target_api = 0
@@ -125,7 +146,13 @@ for app_folder in app_folders:
 		if p_name in flagged_permissions:
 			print "Uses: " + p_name
 
-	
+	# native libraries
+	native_dirs = os.listdir(path + 'lib/')
+	if (debug):
+		print '[debug] Subdirs of lib/: ' + str(native_dirs)
+	if (len(native_dirs) > 0):
+		print 'Uses native code'
+
 	# All exported components that the manifest reveals
 	# Note that some broadcast receivers and services can be created at runtime
 	# TODO - pull out broadcast recievers and services from decompiled java code
@@ -162,40 +189,36 @@ for app_folder in app_folders:
 	########################
 	# REGEX
 	#
-	# read in regex rules
-	rule_file = open('./regex_rules.json', 'r')
-	rules = json.loads(rule_file.read())
-	for rule in rules:
-		#print rule + " " + rules[rule]
-		rules[rule] = re.compile(rules[rule])
-	rule_file.close()
+	if (scan_secrets):
+		#print '-- Results for ' + app_folder + ' --'
+		print '\n-- Sensitive values --'
 
-	debug = True
-	dev_debug = False
-	
-	#print '-- Results for ' + app_folder + ' --'
-	print '\n-- Sensitive values --'
-
-	for root, dirs, files in os.walk(path, topdown=False):
-		for name in files:
-			skip = False
-			filepath = os.path.join(root, name)
-			for item in blacklist:
-				if item in (filepath[-5:]):
-					skip = True
-			if (skip == False):
-				#open file and run regex
-				f = open(filepath, 'r')
-				filedata = f.read()
-				f.close()
-				if (dev_debug):
-					print "Read file: " + filepath
-				for key in rules:
-					found_strings = rules[key].findall(filedata)
-					if (found_strings):
-						for found_string in found_strings:
-							print 'Detected ' + key + ' in ' + name + ', value: ' + found_string
+		for root, dirs, files in os.walk(path, topdown=False):
+			for name in files:
+				skip = False
+				filepath = os.path.join(root, name)
+				for item in blacklist:
+					if item in (filepath[-5:]):
+						skip = True
+				if (skip == False):
+					#open file and run regex
+					f = open(filepath, 'r')
+					filedata = f.read()
+					f.close()
+					#if (debug):
+					#	print "[debug] Read file: " + filepath
+					for key in rules:
+						found_strings = rules[key].findall(filedata)
+						if (found_strings):
+							for found_string in found_strings:
+								try:
+									print 'Detected ' + key + ' in ' + name + ', value: ' + found_string
+								except:
+									# encode/decode error... just tell the user we found something
+									print 'Detected ' + key + ' in ' + name + ', value: <encoding error>'
+						
+							
 			
-	print ''
+		print ''
 
 print "\nDone"
