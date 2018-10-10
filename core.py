@@ -147,7 +147,11 @@ for app_folder in app_folders:
 			print "Uses: " + p_name
 
 	# native libraries
-	native_dirs = os.listdir(path + 'lib/')
+	try:
+		native_dirs = os.listdir(path + 'lib/')
+	except:
+		# does not use native dirs?
+		continue
 	if (debug):
 		print '[debug] Subdirs of lib/: ' + str(native_dirs)
 	if (len(native_dirs) > 0):
