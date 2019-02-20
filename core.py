@@ -33,14 +33,25 @@ def auditElement(xmldocument, search_tag):
 			else:
 				is_exported = False
 		except Exception as e:
-			# not set - check for intent-filters
-			intent_filter = item.getElementsByTagName('intent-filter')
-			if (intent_filter != []):
+			# not set - will check for intent-filters
+			x = 0
+		finally:
+			# check intent_filters anyway, this will overwride the tag if browsable set
+			# which we'd like to know, even if the activity already explicitly exported
+			intent_filters = item.getElementsByTagName('intent-filter')
+			if (intent_filters != []):
 				is_exported = True
-				tag = "(intent-filter)"
+				tag = "(intent-filter)" # override this later if BROWSABLE set
+				for intent_filter in intent_filters:
+					categories = intent_filter.getElementsByTagName('category')
+					if (categories != []):
+						for category in categories:
+							if (str(category.attributes['android:name'].value) == "android.intent.category.BROWSABLE"):
+								tag = "(browsable)"
 			else:
-				is_exported = False
-				tag = "(implicit)"
+				if (is_exported == True): # don't override if it was already set to true by explicitly exported activity
+					is_exported = False
+					tag = "(implicit)"
 		names.append(item.attributes['android:name'].value)
 		verdict.append(is_exported)
 		tags.append(tag)
