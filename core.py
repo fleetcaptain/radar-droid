@@ -57,7 +57,7 @@ def auditElement(xmldocument, search_tag):
 
 # Start main code
 parser = OptionParser('Usage: core.py -i <directory with decompiled app folders> -')
-parser.add_option("-i", "--input", dest="input_dir", help="Directory with decompiled apk files")
+parser.add_option("-i", "--input", dest="input_dir", help="decompiled apk directory")
 parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
 parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
 parser.add_option("--secrets", dest="scan_secrets", action="store_true", help="Search for API keys, tokens, and other sensitive data")
@@ -76,13 +76,18 @@ if (app_folder_directory == None):
 	print parser.usage
 	exit()
 
-app_folders = []
+app_folders = [app_folder_directory]
+# analyzing multiple APK folders at once is confusing
+# Stick with the *nix principal of one tool, one purpose
+# if users wish to analyze multiple folders, they can wrap this tool in a script
+# at least, for now...
+'''
 for name in os.listdir(app_folder_directory):
             if os.path.isdir(os.path.join(app_folder_directory, name)):
 		app_folders.append(app_folder_directory + name)
 		if (debug):
 			print "Added app " + name + " to analysis list"
-
+'''
 if (scan_secrets):
 	# read in regex rules
 	rule_file = open('./regex_rules.json', 'r')
