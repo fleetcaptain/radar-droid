@@ -1,9 +1,9 @@
-# Python script to automate 1) mapping an app's attack surface, at least most of it, and b) hunting through the decompiled apk for secrets like API keys
+# Python script to automate 1) mapping an app's attack surface, at least some of it, and b) hunting through the decompiled apk for secrets like API keys
 # Pre-alpha software... many values hardcoded and stuff. Not ready for general consumption
 # by Carl Pearson <github.com/fleetcaptain> <bugcrowd.com/icewater>
 
-# TODO - implement optparse
 # TODO - make script decompiler-agnostic. Currently only works with jadx output since we look for a ./resources/ folder in the app directory
+# TODO - set the individual functions to return their findings via dicts, not just print in the function
 # unknown if other decompilers make the same output structure
 
 import sys, os, json, re
@@ -14,58 +14,169 @@ from os.path import isfile, join
 from optparse import OptionParser
 
 rules = {}
+activities = {}
 blacklist = ['.jpg', '.png', '.gif', '.tiff']
 flagged_permissions = ["android.permission.WRITE_EXTERNAL_STORAGE"]
 debug = False
 
-# find all exported instances of search_tag. Includes intent-filters
-def auditElement(xmldocument, search_tag):
-	verdict = []
-	names = []
-	tags = []
-	items = xmldocument.getElementsByTagName(search_tag)
+
+
+
+
+# parse xml document looking for exported or available content providers
+def getProviders(xmldocument):
+	items = xmldocument.getElementsByTagName("provider")
+	# for each provider
+	for item in items:
+		is_exported = ''
+		export_val = ''
+		try:
+			export_val = str(item.attributes['android:exported'].value)
+		except:
+			# not set
+			export_val = "unknown"
+
+		if (export_val == "true"):
+			# exported
+			is_exported = True
+		else:
+			is_exported = False
+				
+		# final verdict for this provider
+		if (is_exported):
+			print "[Provider] " +  str(item.attributes['android:name'].value)
+			
+
+# parse xml document looking for exported or available services
+def getServices(xmldocument):
+	items = xmldocument.getElementsByTagName("service")
+	# for each service
+	for item in items:
+		is_exported = ''
+		export_val = ''
+		try:
+			export_val = str(item.attributes['android:exported'].value)
+		except:
+			# not set
+			export_val = "unknown"
+
+		if (export_val == "true"):
+			# exported
+			is_exported = True
+		else:
+			is_exported = False
+				
+		# final verdict for this service
+		if (is_exported):
+			print "[Service] " + str(item.attributes['android:name'].value)
+
+
+# parse xml document looking for exported or available broadcast receivers
+def getReceivers(xmldocument):
+	items = xmldocument.getElementsByTagName("receiver")
+	# for each receiver
+	for item in items:
+		is_exported = ''
+		permission = ''
+		action_list = []
+		export_val = ''
+		try:
+			export_val = str(item.attributes['android:exported'].value)
+		except:
+			# not set
+			export_val = "unknown"
+
+		if (export_val == "false"):
+			# explicitly not exported
+			is_exported = False
+		else:
+			# true or not set
+			intent_filters = item.getElementsByTagName('intent-filter')
+			if (intent_filters != []):
+				is_exported = True
+				for intent_filter in intent_filters:
+					#Check permission settings to see if we need a certain permission
+					# to send broadcasts to this receiver
+					permission = ""
+					try:
+						permission = str(item.attributes['android:permission'].value)
+					except:
+						# no permissions required?
+						permission = "none"
+					#print item.attributes['android:name'].value + " " + permission
+					actions = intent_filter.getElementsByTagName('action')
+
+					# Get the broadcast strings that activate this receiver (should have values but let's check anyway...)
+					if (actions != []):
+						for action in actions:
+							action_list.append(str(action.attributes['android:name'].value))
+				
+		# final verdict for this receiver
+		if (is_exported):
+			print "[Receiver] " + str(item.attributes['android:name'].value)
+			print "\tPermission: " + permission
+			for action in action_list:
+				print '\tAction: ' + action
+			print ''
+
+
+
+# parse xml document looking for exported or available activities
+def getActivities(xmldocument):
+	items = xmldocument.getElementsByTagName("activity")
+	# for each activity
 	for item in items:
 		is_exported = ''
 		tag = ''
+		export_val = ''
 		try:
-			if (str(item.attributes['android:exported'].value) == "true"):
-				is_exported = True
-				if (search_tag == "receiver"):
-					if (item.attributes['android:permission'].value != None):
-						tag = "permission: " + item.attributes['android:permission'].value
-			else:
-				is_exported = False
+			export_val = str(item.attributes['android:exported'].value)
 		except Exception as e:
 			# not set - will check for intent-filters
-			x = 0
-		finally:
-			# For activities, check intent_filters anyway, this will overwride the tag if browsable set
-			# which we'd like to know, even if the activity already explicitly exported
-			
-			# receivers always have an intent-filter to spec what to activate upon
-			# more interested in permissions above - so export it if not already but leave tag along	
-			if (search_tag != "receiver"):
-				intent_filters = item.getElementsByTagName('intent-filter')
-				if (intent_filters != []):
-					is_exported = True
-					tag = "(intent-filter)" # override this later if BROWSABLE set
-					for intent_filter in intent_filters:
-						categories = intent_filter.getElementsByTagName('category')
-						if (categories != []):
-							for category in categories:
-								if (str(category.attributes['android:name'].value) == "android.intent.category.BROWSABLE"):
-									tag = "(browsable)"
-				else:
-					if (is_exported == True): # don't override if it was already set to true by explicitly exported activity
-						is_exported = False
-						tag = "(implicit)"
-			else:
+			export_val = "unknown"
+
+		if (export_val == "false"):
+			# explicitly not exported
+			is_exported = False
+		else:
+			# need to check if an intent filter is set.
+			intent_filters = item.getElementsByTagName('intent-filter')
+			if (intent_filters != []):
 				is_exported = True
-		names.append(item.attributes['android:name'].value)
-		verdict.append(is_exported)
-		tags.append(tag)
-		#print item.attributes['android:name'].value + " " + str(is_exported) + " " + tag
-	return names, verdict, tags
+				for intent_filter in intent_filters:
+					tag = "(intent-filter)"
+					# exported due to intent filter (which may limit the exposed attack paths
+					# Now check if it's a browsable activity. These can be reached via links like on webpages,	
+					# so vulnerabilities might be easier to exploit
+					categories = intent_filter.getElementsByTagName('category')
+					if (categories != []):
+						for category in categories:
+							if (str(category.attributes['android:name'].value) == "android.intent.category.BROWSABLE"):
+								tag = "(browsable)"
+					'''
+					elif (search_tag == "receiver"):
+						permission = ""
+						try:
+							permission = item.attributes['android:permission'].value
+						except:
+							permission = " no permission?"
+						#print item.attributes['android:name'].value + " " + permission
+						# lets get some metadata about the receiver
+						if (permission != " no permission?"):
+							tag = "permission: " + item.attributes['android:permission'].value
+						actions = intent_filter.getElementsByTagName('action')
+						if (actions != []):
+							for action in actions:
+								tag = tag + "\n\t" + (str(action.attributes['android:name'].value)) + " "
+					'''
+			else:
+				if (export_val == "true"): # if there are no intent filters but the activity was exported explicitly, we do want to report it
+					is_exported = True
+					tag = "(explicit)"
+				
+		# final verdict for this activity
+		if (is_exported):
+			print "[Activity] " + item.attributes['android:name'].value + " " + str(is_exported) + " " + tag
 
 
 
@@ -141,7 +252,7 @@ for app_folder in app_folders:
 	try:
 		target_api = int(uses_sdk[0].attributes['android:targetSdkVersion'].value)
 	except:
-		target_api = '-1'
+		target_api = 'not specified'
 	print "Target API: " + str(target_api)
 	if (target_api < 17):
 		print "Target API is old, check manifest manually for further vulnerabilities"
@@ -188,32 +299,20 @@ for app_folder in app_folders:
 	print '\n-- Exported Components --'
 
 	# activities
-	# returns name, exported, and tag
-	names, verdicts, tags = auditElement(xmldoc, 'activity')
-	for x in range(0, len(names)):
-		if (verdicts[x] == True):
-			print "[Activity] " + names[x] + " " + tags[x]
+	print ''
+	getActivities(xmldoc)
 
 	# providers
 	print ''
-	names, verdicts, tags = auditElement(xmldoc, 'provider')
-	for x in range(0, len(names)):
-		if (verdicts[x] == True):
-			print "[Provider] " + names[x] + " " + tags[x]
+	getProviders(xmldoc)
+
 	# Services
 	print ''
-	names, verdicts, tags = auditElement(xmldoc, 'service')
-	for x in range(0, len(names)):
-		if (verdicts[x] == True):
-			print "[Service] " + names[x] + " " + tags[x]
+	getServices(xmldoc)
 
 	# Static receivers
 	print ''
-	names, verdicts, tags = auditElement(xmldoc, 'receiver')
-	for x in range(0, len(names)):
-		if (verdicts[x] == True):
-			print "[Receiver] " + names[x] + " " + tags[x]
-
+	getReceivers(xmldoc)
 
 	########################
 	# REGEX
