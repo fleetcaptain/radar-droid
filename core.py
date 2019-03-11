@@ -17,10 +17,21 @@ rules = {}
 activities = {}
 blacklist = ['.jpg', '.png', '.gif', '.tiff']
 flagged_permissions = ["android.permission.WRITE_EXTERNAL_STORAGE"]
+runtime_elements = ['onStartCommand(', 'handleMessage(']
+runtime_broadcast = ['new BroadcastReceiver()', 'sendBroadcast(', 'extends BroadcastReceiver']
 debug = False
 
 
 
+# given a path, walk through it and return the full path
+# to all files
+def getAllFiles(path):
+	allfiles = []
+	for root, dirs, files in os.walk(java, topdown=False):
+		for name in files:
+			filepath = os.path.join(root, name)
+			allfiles.append(filepath)
+	return allfiles
 
 
 # parse xml document looking for exported or available content providers
@@ -189,6 +200,8 @@ def getActivities(xmldocument):
 # Start main code
 parser = OptionParser('Usage: core.py -i <directory with decompiled app folders> -')
 parser.add_option("-i", "--input", dest="input_dir", help="decompiled apk directory")
+parser.add_option("-j", "--java", dest="java", help="directory with the app's decompiled .java source files")
+parser.add_option("--high-confidence", action="store_true", dest="confidence", help="do not return low quality hits in source code search (ex: skip broadcasters in files with LocalBroadcastManager imported")
 parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
 parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
 parser.add_option("--secrets", dest="scan_secrets", action="store_true", help="Search for API keys, tokens, and other sensitive data")
@@ -198,7 +211,10 @@ app_folder_directory = options.input_dir
 out_file = options.out_file
 debug = options.debug
 scan_secrets = options.scan_secrets
+java = options.java
+confidence = options.confidence
 
+check_all = True
 #print 'Usage: core.py [directory with decompiled app folders] [debug true or false]'
 
 # input - a folder path. Inside this folder should be app files decompiled with apktool
@@ -228,6 +244,9 @@ if (scan_secrets):
 			print '[debug] Regex rule: ' + rule + " " + rules[rule]
 		rules[rule] = re.compile(rules[rule])
 	rule_file.close()
+
+if (confidence):
+	check_all = False
 
 for app_folder in app_folders:
 	path = app_folder + "/"
@@ -283,16 +302,18 @@ for app_folder in app_folders:
 			print "Uses: " + p_name
 
 	# native libraries
+	native_dirs = []
 	try:
 		native_dirs = os.listdir(path + 'lib/')
 	except:
 		# does not use native dirs?
-		continue
+		if (debug):
+			print "[debug] no native libraries"
 	if (debug):
 		print '[debug] Subdirs of lib/: ' + str(native_dirs)
 	if (len(native_dirs) > 0):
 		print 'Uses native code'
-
+	
 	# All exported components that the manifest reveals
 	# Note that some broadcast receivers and services can be created at runtime
 	# TODO - pull out broadcast recievers and services from decompiled java code
@@ -314,6 +335,26 @@ for app_folder in app_folders:
 	print ''
 	getReceivers(xmldoc)
 
+	code_search = []
+	# Now let's hunt through decompiled code :)
+	if (java != None):
+		file_list = getAllFiles(java)
+		for fi in file_list:
+			f = open(fi, 'r')
+			filedata = f.read()
+			f.close()
+			for item in runtime_elements:
+				if (item in filedata):
+					code_search.append('Detected ' + item + ' in ' + fi)
+			for item in runtime_broadcast:
+				if (item in filedata and "LocalBroadcastManager" not in filedata):
+					code_search.append('[High] Detected ' + item + ' in ' + fi)
+				else:
+					if (check_all): # only return low confidence (i.e. probably local broadcast) items if user did not specify only high confidence items
+						code_search.append('Detected ' + item + ' in ' + fi)
+	code_search.sort()
+	for result in code_search:
+		print result
 	########################
 	# REGEX
 	#
