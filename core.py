@@ -3,7 +3,7 @@
 # by Carl Pearson <github.com/fleetcaptain> <bugcrowd.com/icewater>
 
 # TODO - make script decompiler-agnostic. Currently only works with jadx output since we look for a ./resources/ folder in the app directory
-# TODO - set the individual functions to return their findings via dicts, not just print in the function
+# TODO - set the individual functions to return their findings via dicts, not just printString(in the function
 # unknown if other decompilers make the same output structure
 
 import sys, os, json, re
@@ -17,10 +17,20 @@ rules = {}
 activities = {}
 blacklist = ['.jpg', '.png', '.gif', '.tiff']
 flagged_permissions = ["android.permission.WRITE_EXTERNAL_STORAGE"]
-runtime_elements = ['onStartCommand(', 'handleMessage(']
-runtime_broadcast = ['new BroadcastReceiver()', 'sendBroadcast(', 'extends BroadcastReceiver']
-debug = False
 
+#runtime_elements = ['onStartCommand(', 'handleMessage(', 'new WebView(', 'getExternalCacheDir()', 'getExternalFilesDir()', 'new BroadcastReceiver()', 'extends BroadcastReceiver', '@JavascriptInterface']
+runtime_broadcast = ['sendBroadcast(']
+debug = False
+blacklist_receivers = []
+structured_output = {} # the JSON output
+silent = False
+
+
+
+# consolidate printing stuff so we only need to check silent mode once
+def printString(string):
+	if (silent != True):
+		print string
 
 
 # given a path, walk through it and return the full path
@@ -55,7 +65,10 @@ def getProviders(xmldocument):
 				
 		# final verdict for this provider
 		if (is_exported):
-			print "[Provider] " +  str(item.attributes['android:name'].value)
+			printString("[Provider] " +  str(item.attributes['android:name'].value))
+			tempd = {}
+			tempd['id'] = item.attributes['android:name'].value
+			structured_output['providers'].append(tempd)
 			
 
 # parse xml document looking for exported or available services
@@ -79,7 +92,11 @@ def getServices(xmldocument):
 				
 		# final verdict for this service
 		if (is_exported):
-			print "[Service] " + str(item.attributes['android:name'].value)
+			printString("[Service] " + str(item.attributes['android:name'].value))
+			tempd = {}
+			tempd['id'] = item.attributes['android:name'].value
+			structured_output['services'].append(tempd)
+			
 
 
 # parse xml document looking for exported or available broadcast receivers
@@ -114,7 +131,7 @@ def getReceivers(xmldocument):
 					except:
 						# no permissions required?
 						permission = "none"
-					#print item.attributes['android:name'].value + " " + permission
+					#printString(item.attributes['android:name'].value + " " + permission
 					actions = intent_filter.getElementsByTagName('action')
 
 					# Get the broadcast strings that activate this receiver (should have values but let's check anyway...)
@@ -124,12 +141,19 @@ def getReceivers(xmldocument):
 				
 		# final verdict for this receiver
 		if (is_exported):
-			print "[Receiver] " + str(item.attributes['android:name'].value)
-			print "\tPermission: " + permission
+			printString("[Receiver] " + str(item.attributes['android:name'].value))
+			printString("\tPermission: " + permission)
+			tempd = {}
+			tempd['id'] = item.attributes['android:name'].value
+			tempd['permission'] = permission
+			tempd['actions'] = []
 			for action in action_list:
-				print '\tAction: ' + action
-			print ''
-
+				printString('\tAction: ' + action)
+				tempd['actions'].append(action)
+			printString('')
+			structured_output['receivers'].append(tempd)
+		else:
+			blacklist_receivers.append(str(item.attributes['android:name'].value))
 
 
 # parse xml document looking for exported or available activities
@@ -171,7 +195,7 @@ def getActivities(xmldocument):
 							permission = item.attributes['android:permission'].value
 						except:
 							permission = " no permission?"
-						#print item.attributes['android:name'].value + " " + permission
+						#printString(item.attributes['android:name'].value + " " + permission
 						# lets get some metadata about the receiver
 						if (permission != " no permission?"):
 							tag = "permission: " + item.attributes['android:permission'].value
@@ -187,7 +211,12 @@ def getActivities(xmldocument):
 				
 		# final verdict for this activity
 		if (is_exported):
-			print "[Activity] " + item.attributes['android:name'].value + " " + str(is_exported) + " " + tag
+			printString("[Activity] " + item.attributes['android:name'].value + " " + str(is_exported) + " " + tag)
+			tempd = {}
+			tempd['id'] = item.attributes['android:name'].value
+			tempd['method'] = tag
+			structured_output['activities'].append(tempd)
+
 
 
 
@@ -198,32 +227,33 @@ def getActivities(xmldocument):
 
 
 # Start main code
-parser = OptionParser('Usage: core.py -i <directory with decompiled app folders> -')
-parser.add_option("-i", "--input", dest="input_dir", help="decompiled apk directory")
+parser = OptionParser('Usage: core.py -m <path to AndroidManifest.xml> -j <path to decompiled .java source code> -o (output file) --debug --secrets --high-confidence')
+parser.add_option('-m', '--manifest', dest="manifest", help="AndroidManifest.xml file to analyze")
 parser.add_option("-j", "--java", dest="java", help="directory with the app's decompiled .java source files")
 parser.add_option("--high-confidence", action="store_true", dest="confidence", help="do not return low quality hits in source code search (ex: skip broadcasters in files with LocalBroadcastManager imported")
 parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
 parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
+parser.add_option("--json", dest="json", action="store_true", help="output results in JSON format for parsing by other scripts")
 parser.add_option("--secrets", dest="scan_secrets", action="store_true", help="Search for API keys, tokens, and other sensitive data")
 
 (options, args) = parser.parse_args()
-app_folder_directory = options.input_dir
 out_file = options.out_file
 debug = options.debug
 scan_secrets = options.scan_secrets
 java = options.java
 confidence = options.confidence
+manifest = options.manifest
+usejson = options.json
 
 check_all = True
-#print 'Usage: core.py [directory with decompiled app folders] [debug true or false]'
+#printString('Usage: core.py [directory with decompiled app folders] [debug true or false]'
 
-# input - a folder path. Inside this folder should be app files decompiled with apktool
-if (app_folder_directory == None):
-	print 'You must specify an input directory'
-	print parser.usage
+# input - path to AndroidManifest.xml
+if (manifest == None):
+	printString('You must specify an input manifest file')
+	printString(parser.usage)
 	exit()
 
-app_folders = [app_folder_directory]
 # analyzing multiple APK folders at once is confusing
 # Stick with the *nix principal of one tool, one purpose
 # if users wish to analyze multiple folders, they can wrap this tool in a script
@@ -233,161 +263,218 @@ for name in os.listdir(app_folder_directory):
             if os.path.isdir(os.path.join(app_folder_directory, name)):
 		app_folders.append(app_folder_directory + name)
 		if (debug):
-			print "Added app " + name + " to analysis list"
+			printString("Added app " + name + " to analysis list"
 '''
+
+if (usejson):
+	silent = True # no output anything but json
+
 if (scan_secrets):
 	# read in regex rules
 	rule_file = open('./regex_rules.json', 'r')
 	rules = json.loads(rule_file.read())
 	for rule in rules:
 		if (debug):
-			print '[debug] Regex rule: ' + rule + " " + rules[rule]
+			printString('[debug] Regex rule: ' + rule + " " + rules[rule])
 		rules[rule] = re.compile(rules[rule])
 	rule_file.close()
 
 if (confidence):
 	check_all = False
 
-for app_folder in app_folders:
-	path = app_folder + "/"
+# XML parsing of AndroidManifest.xml
+# check:
+# - backup (allowed, disallowed, not specified)
+# - exported activities
+# - activites with intent-filters
+# - exported providers
+# - exported services
 
-	# XML parsing of AndroidManifest.xml
-	# check:
-	# - backup (allowed, disallowed, not specified)
-	# - exported activities
-	# - activites with intent-filters
-	# - exported providers
-	# - exported services
+xmldoc = minidom.parse(manifest)
+packagename = xmldoc.getElementsByTagName('manifest')[0].attributes['package'].value
+structured_output['app'] = packagename
 
-	xmldoc = minidom.parse(path + 'AndroidManifest.xml')
-	print '\n-------------------------------------'
-	print '-- Results for ' + xmldoc.getElementsByTagName('manifest')[0].attributes['package'].value
-	print ''#print '##############################'
+printString('\n-------------------------------------')
+printString('-- Results for ' + packagename)
+printString('')#printString('##############################')
 
-	print '-- Misc Info --'
-	# target SDK
-	uses_sdk = xmldoc.getElementsByTagName('uses-sdk')
-	target_api = 0
-	try:
-		target_api = int(uses_sdk[0].attributes['android:targetSdkVersion'].value)
-	except:
-		target_api = 'not specified'
-	print "Target API: " + str(target_api)
-	if (target_api < 17):
-		print "Target API is old, check manifest manually for further vulnerabilities"
+printString('-- Misc Info --')
+# target SDK
+uses_sdk = xmldoc.getElementsByTagName('uses-sdk')
+target_api = 0
+try:
+	target_api = int(uses_sdk[0].attributes['android:targetSdkVersion'].value)
+except:
+	target_api = 'not specified'
+structured_output['target_api'] = target_api
+printString("Target API: " + str(target_api))
+if (target_api < 17):
+	printString("Target API is old, check manifest manually for further vulnerabilities")
 
-	# backup
-	application = xmldoc.getElementsByTagName('application')
-	try:
-		backupvalue = str(application[0].attributes['android:allowBackup'].value)
-	except Exception as e:
-		# not set
-		#print e
-		backupvalue = "True (implicit)"
-	print "Backup set: " + backupvalue
+# backup
+application = xmldoc.getElementsByTagName('application')
+try:
+	backupvalue = str(application[0].attributes['android:allowBackup'].value)
+except Exception as e:
+	# not set
+	#printString(e
+	backupvalue = "True (implicit)"
+structured_output['backup'] = backupvalue
+printString("Backup set: " + backupvalue)
 
-	# debuggable
-	try:
-		debuggable = str(application[0].attributes['debuggable'].value)
-	except Exception as e:
-		# not set
-		debuggable = "False (implicit)"
-	print "Debuggable: " + debuggable
+# debuggable
+try:
+	debuggable = str(application[0].attributes['debuggable'].value)
+except Exception as e:
+	# not set
+	debuggable = "False (implicit)"
+structured_output['debuggable'] = debuggable
+printString("Debuggable: " + debuggable)
 
-	# permissions
-	permissions = xmldoc.getElementsByTagName('uses-permission')
-	for permission in permissions:
-		p_name = str(permission.attributes['android:name'].value)
-		if p_name in flagged_permissions:
-			print "Uses: " + p_name
+# permissions
+permissions = xmldoc.getElementsByTagName('uses-permission')
+structured_output['permissions'] = []
+for permission in permissions:
+	p_name = str(permission.attributes['android:name'].value)
+	if p_name in flagged_permissions:
+		printString("Uses: " + p_name)
+		structured_output["permissions"].append(p_name)
 
-	# native libraries
-	native_dirs = []
-	try:
-		native_dirs = os.listdir(path + 'lib/')
-	except:
-		# does not use native dirs?
-		if (debug):
-			print "[debug] no native libraries"
+# native libraries
+'''
+native_dirs = []
+try:
+	native_dirs = os.listdir(path + 'lib/')
+except:
+	# does not use native dirs?
 	if (debug):
-		print '[debug] Subdirs of lib/: ' + str(native_dirs)
-	if (len(native_dirs) > 0):
-		print 'Uses native code'
-	
-	# All exported components that the manifest reveals
-	# Note that some broadcast receivers and services can be created at runtime
-	# TODO - pull out broadcast recievers and services from decompiled java code
-	print '\n-- Exported Components --'
+		printString("[debug] no native libraries"
+if (debug):
+	printString('[debug] Subdirs of lib/: ' + str(native_dirs)
+if (len(native_dirs) > 0):
+	printString('Uses native code'
+'''
 
-	# activities
-	print ''
-	getActivities(xmldoc)
+# All exported components that the manifest reveals
+# Note that some broadcast receivers and services can be created at runtime
+# TODO - pull out broadcast recievers and services from decompiled java code
+printString('\n-- Exported Components --')
 
-	# providers
-	print ''
-	getProviders(xmldoc)
+# activities
+printString('')
+structured_output['activities'] = []
+getActivities(xmldoc)
 
-	# Services
-	print ''
-	getServices(xmldoc)
+# providers
+printString('')
+structured_output['providers'] = []
+getProviders(xmldoc)
 
-	# Static receivers
-	print ''
-	getReceivers(xmldoc)
+# Services
+printString('')
+structured_output['services'] = []
+getServices(xmldoc)
 
-	code_search = []
-	# Now let's hunt through decompiled code :)
-	if (java != None):
-		file_list = getAllFiles(java)
-		for fi in file_list:
-			f = open(fi, 'r')
-			filedata = f.read()
-			f.close()
-			for item in runtime_elements:
-				if (item in filedata):
-					code_search.append('Detected ' + item + ' in ' + fi)
-			for item in runtime_broadcast:
-				if (item in filedata and "LocalBroadcastManager" not in filedata):
-					code_search.append('[High] Detected ' + item + ' in ' + fi)
-				else:
-					if (check_all): # only return low confidence (i.e. probably local broadcast) items if user did not specify only high confidence items
-						code_search.append('Detected ' + item + ' in ' + fi)
-	code_search.sort()
-	for result in code_search:
-		print result
-	########################
-	# REGEX
-	#
-	if (scan_secrets):
-		#print '-- Results for ' + app_folder + ' --'
-		print '\n-- Sensitive values --'
+# Static receivers
+printString('')
+structured_output['receivers'] = []
+getReceivers(xmldoc)
 
-		for root, dirs, files in os.walk(path, topdown=False):
-			for name in files:
-				skip = False
-				filepath = os.path.join(root, name)
-				for item in blacklist:
-					if item in (filepath[-5:]):
-						skip = True
-				if (skip == False):
-					#open file and run regex
-					f = open(filepath, 'r')
-					filedata = f.read()
-					f.close()
-					#if (debug):
-					#	print "[debug] Read file: " + filepath
-					for key in rules:
-						found_strings = rules[key].findall(filedata)
-						if (found_strings):
-							for found_string in found_strings:
-								try:
-									print 'Detected ' + key + ' in ' + name + ', value: ' + found_string
-								except:
-									# encode/decode error... just tell the user we found something
-									print 'Detected ' + key + ' in ' + name + ', value: <encoding error>'
+structured_output['runtime_elements'] = {}
+structured_output['runtime_elements']['webviews'] = []
+structured_output['runtime_elements']['services'] = []
+structured_output['runtime_elements']['receivers'] = []
+structured_output['runtime_elements']['broadcasters'] = []
+
+code_search = []
+# Now let's hunt through decompiled code :)
+if (java != None):
+	file_list = getAllFiles(java)
+	for fi in file_list:
+		fi_name = fi.replace(java, '')
+		f = open(fi, 'r')
+		filedata = f.read()
+		f.close()
+		item_id = fi_name.replace('/', '.')
+		'''
+		for item in runtime_elements:
+			if (item in filedata):
+				code_search.append('Detected ' + item + ' in ' + fi_name)
+			structured_output['item'] = fi_name
+		'''
+		if ('new WebView(' in filedata):
+			#print 'here'
+			if (check_all == False):
+				#print 'check_all true'
+				if (packagename in item_id):
+					structured_output['runtime_elements']['webviews'].append(item_id)
+			else:
+				#print 'check_all false'
+				structured_output['runtime_elements']['webviews'].append(item_id)
+
+		elif ('onStartCommand(' in filedata or 'handleMessage(' in filedata):
+			if (check_all == False):
+				if (packagename in item_id):
+					structured_output['runtime_elements']['services'].append(item_id)
+			else:
+				structured_output['runtime_elements']['services'].append(item_id)
+
+		elif ('new BroadcastReceiver()' in filedata or 'extends BroadcastReceiver' in filedata):
+			if (check_all == False):
+				if (packagename in item_id):
+					structured_output['runtime_elements']['receivers'].append(item_id)
+			else:
+				structured_output['runtime_elements']['receivers'].append(item_id)
+
+		for item in runtime_broadcast:
+			if (item in filedata and "LocalBroadcastManager" not in filedata):
+				if (packagename in item_id):
+					code_search.append('[High] Detected ' + item + ' in ' + item_id)
+					structured_output['runtime_elements']['broadcasters'].append(item_id)
+			else:
+				if (check_all): # only return low confidence (i.e. probably local broadcast) items if user did not specify only high confidence items
+					code_search.append('Detected ' + item + ' in ' + item_id)
+					structured_output['runtime_elements']['broadcasters'].append(item_id)
+code_search.sort()
+for result in code_search:
+	printString(result)
+########################
+# REGEX
+#
+if (scan_secrets):
+	#printString('-- Results for ' + app_folder + ' --'
+	printString('\n-- Sensitive values --')
+
+	for root, dirs, files in os.walk(java, topdown=False):
+		for name in files:
+			skip = False
+			filepath = os.path.join(root, name)
+			for item in blacklist:
+				if item in (filepath[-5:]):
+					skip = True
+			if (skip == False):
+				#open file and run regex
+				f = open(filepath, 'r')
+				filedata = f.read()
+				f.close()
+				#if (debug):
+				#	printString("[debug] Read file: " + filepath
+				for key in rules:
+					found_strings = rules[key].findall(filedata)
+					if (found_strings):
+						for found_string in found_strings:
+							try:
+								printString('Detected ' + key + ' in ' + name + ', value: ' + found_string)
+							except:
+								# encode/decode error... just tell the user we found something
+								printString('Detected ' + key + ' in ' + name + ', value: <encoding error>')
+					
 						
-							
-			
-		print ''
+		
+	printString('')
 
-print "\nDone"
+printString("\nDone")
+
+if (usejson):
+	# actually print the json regardless of the silent mode
+	print json.dumps(structured_output)
