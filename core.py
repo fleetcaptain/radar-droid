@@ -234,7 +234,7 @@ parser.add_option("--high-confidence", action="store_true", dest="confidence", h
 parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
 parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
 parser.add_option("--json", dest="json", action="store_true", help="output results in JSON format for parsing by other scripts")
-parser.add_option("--secrets", dest="scan_secrets", action="store_true", help="Search for API keys, tokens, and other sensitive data")
+parser.add_option("--secrets", dest="scan_secrets", help="JSON regex file containing search terms for API keys, tokens, and other sensitive data")
 
 (options, args) = parser.parse_args()
 out_file = options.out_file
@@ -269,9 +269,9 @@ for name in os.listdir(app_folder_directory):
 if (usejson):
 	silent = True # no output anything but json
 
-if (scan_secrets):
+if (scan_secrets != None):
 	# read in regex rules
-	rule_file = open('./regex_rules.json', 'r')
+	rule_file = open(scan_secrets, 'r')
 	rules = json.loads(rule_file.read())
 	for rule in rules:
 		if (debug):
@@ -382,6 +382,7 @@ getReceivers(xmldoc)
 
 structured_output['runtime_elements'] = {}
 structured_output['runtime_elements']['webviews'] = []
+structured_output['runtime_elements']['js_bridges'] = []
 structured_output['runtime_elements']['services'] = []
 structured_output['runtime_elements']['receivers'] = []
 structured_output['runtime_elements']['broadcasters'] = []
@@ -389,6 +390,8 @@ structured_output['runtime_elements']['broadcasters'] = []
 code_search = []
 # Now let's hunt through decompiled code :)
 if (java != None):
+	if (debug):
+		printString("Analzying java source code at " + java)
 	file_list = getAllFiles(java)
 	for fi in file_list:
 		fi_name = fi.replace(java, '')
@@ -396,35 +399,45 @@ if (java != None):
 		filedata = f.read()
 		f.close()
 		item_id = fi_name.replace('/', '.')
+		#print item_id
 		'''
 		for item in runtime_elements:
 			if (item in filedata):
 				code_search.append('Detected ' + item + ' in ' + fi_name)
 			structured_output['item'] = fi_name
 		'''
-		if ('new WebView(' in filedata):
+		if (' WebView' in filedata):
 			#print 'here'
 			if (check_all == False):
-				#print 'check_all true'
+				#print packagename
+				#print item_id
 				if (packagename in item_id):
+					code_search.append('[High] Detected WebView in ' + item_id)
 					structured_output['runtime_elements']['webviews'].append(item_id)
 			else:
 				#print 'check_all false'
+				code_search.append('Detected WebView in ' + item_id)
 				structured_output['runtime_elements']['webviews'].append(item_id)
 
-		elif ('onStartCommand(' in filedata or 'handleMessage(' in filedata):
+		if ('new BroadcastReceiver()' in filedata or 'extends BroadcastReceiver' in filedata):
 			if (check_all == False):
 				if (packagename in item_id):
-					structured_output['runtime_elements']['services'].append(item_id)
-			else:
-				structured_output['runtime_elements']['services'].append(item_id)
-
-		elif ('new BroadcastReceiver()' in filedata or 'extends BroadcastReceiver' in filedata):
-			if (check_all == False):
-				if (packagename in item_id):
+					code_search.append('[High] Detected ' + item + ' in ' + item_id)
 					structured_output['runtime_elements']['receivers'].append(item_id)
 			else:
+				code_search.append('Detected ' + item + ' in ' + item_id)
 				structured_output['runtime_elements']['receivers'].append(item_id)
+
+		if ('@JavascriptInterface' in filedata):
+			if (check_all == False):
+				if (packagename in item_id):
+					code_search.append('[High] Detected Javascript Bridge in ' + item_id)
+					structured_output['runtime_elements']['js_bridges'].append(item_id)
+			else:
+				code_search.append('Detected Javascript Bridge in ' + item_id)
+				structured_output['runtime_elements']['js_bridges'].append(item_id)
+
+
 
 		for item in runtime_broadcast:
 			if (item in filedata and "LocalBroadcastManager" not in filedata):
@@ -438,6 +451,8 @@ if (java != None):
 code_search.sort()
 for result in code_search:
 	printString(result)
+
+
 ########################
 # REGEX
 #
