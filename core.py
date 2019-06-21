@@ -363,7 +363,7 @@ if (java != None):
 		item_id = fi_name.replace('/', '.')
 		
 		if (' WebView' in filedata):
-			print 'here'
+			#print 'here'
 			if (check_all == False):
 				#print packagename
 				#print item_id
