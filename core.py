@@ -32,6 +32,7 @@ packagename = None
 ## Database related methods
 def initDB(db):
 	db.execute('''CREATE TABLE activities (app text, activity text, tag text, first_seen text)''')
+	db.execute('''CREATE TABLE providers (app text, provider text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE receivers (app text, receiver text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE receiver_actions (app text, receiver text, action text)''')
 	db.execute('''CREATE TABLE runtime_receivers (app text, receiver text, tag text, first_seen text)''')
@@ -273,8 +274,15 @@ if (scan_secrets != None):
 if (confidence):
 	check_all = False
 
-conn = sqlite3.connect('apps.db')
-initDB(conn)
+db_file = 'apps.db'
+if (not os.path.exists(db_file)):
+	# init tables if DB does not already exist
+	conn = sqlite3.connect(db_file)
+	initDB(conn)
+	if (debug):
+		printString("Created DB")
+else:
+	conn = sqlite3.connect(db_file)
 
 # parse manifest
 xmldoc = minidom.parse(manifest)
