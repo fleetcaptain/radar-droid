@@ -38,7 +38,7 @@ def initDB(db):
 	db.execute('''CREATE TABLE runtime_receivers (app text, receiver text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE services (app text, service text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE webviews (app text, webview text, tag text, first_seen text)''')
-	db.execute('''CREATE TABLE broadcaster (app text, broadcaster text, tag text, first_seen text)''')
+	db.execute('''CREATE TABLE broadcasters (app text, broadcaster text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE jsbridges (app text, item text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE permissions (app text, permission text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE appinfo (app text, sdk integer, backup text, debug text)''')
