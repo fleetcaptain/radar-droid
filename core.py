@@ -88,13 +88,23 @@ def getProviders(xmldocument, db):
 	for item in items:
 		is_exported = ''
 		export_val = ''
+		permission_val = ''
 		try:
 			export_val = str(item.attributes['android:exported'].value)
 		except:
 			# not set
 			export_val = "unknown"
 
-		if (export_val == "true"):
+		# If it has "Permission" set... I'm not interested in it
+		# Note if writePermission or readPermission are set that is a limiting factor but we are still interested since would maybe interact with at least 1/2 of the read/write permission set
+		# Unless write and read are both explicitly set, but we aren't checking that...
+		try:
+			permission_val = str(item.attributes['android:permission'].value)
+		except:
+			# not set
+			permission_val = "unknown"
+
+		if (export_val == "true" and permission_val == "unknown"):
 			# exported
 			is_exported = True
 		else:
