@@ -215,8 +215,8 @@ def getActivities(xmldocument, db):
 			intent_filters = item.getElementsByTagName('intent-filter')
 			if (intent_filters != []):
 				is_exported = True
+				tag = "intent-filter"
 				for intent_filter in intent_filters:
-					tag = "intent-filter"
 					# exported due to intent filter (which may limit the exposed attack paths
 					# Now check if it's a browsable activity. These can be reached via links like on webpages,	
 					# so vulnerabilities might be easier to exploit
@@ -225,6 +225,7 @@ def getActivities(xmldocument, db):
 						for category in categories:
 							if (str(category.attributes['android:name'].value) == "android.intent.category.BROWSABLE"):
 								tag = "browsable"
+								break
 			else:
 				if (export_val == "true"): # if there are no intent filters but the activity was exported explicitly, we do want to report it
 					is_exported = True
