@@ -67,7 +67,7 @@ def saveAction(db, table, app, receiver, action):
 # consolidate printing stuff so we only need to check silent mode once
 def printString(string):
 	if (silent != True):
-		print string
+		print(string)
 
 
 # given a path, walk through it and return the full path
