@@ -32,6 +32,7 @@ packagename = None
 ## Database related methods
 def initDB(db):
 	db.execute('''CREATE TABLE activities (app text, activity text, tag text, first_seen text)''')
+	db.execute('''CREATE TABLE aliases (app text, alias text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE providers (app text, provider text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE receivers (app text, receiver text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE receiver_actions (app text, receiver text, action text)''')
@@ -45,7 +46,7 @@ def initDB(db):
 	db.commit()
 
 
-# save DB item
+# save general DB item
 def saveItem(db, table, app, item, tag, first_seen):
 	db.execute("INSERT INTO " + table + " VALUES ('" + app + "','" + item + "','" + tag + "','" + first_seen + "')")
 	db.commit()
@@ -238,6 +239,51 @@ def getActivities(xmldocument, db):
 
 
 
+# parse xml document looking for exported or available activities
+def getAliases(xmldocument, db):
+	items = xmldocument.getElementsByTagName("activity-alias")
+	# for each alias
+	for item in items:
+		is_exported = ''
+		tag = ''
+		export_val = ''
+		try:
+			export_val = str(item.attributes['android:exported'].value)
+		except Exception as e:
+			# not set - will check for intent-filters
+			export_val = "unknown"
+
+		if (export_val == "false"):
+			# explicitly not exported
+			is_exported = False
+		else:
+			# need to check if an intent filter is set.
+			intent_filters = item.getElementsByTagName('intent-filter')
+			if (intent_filters != []):
+				is_exported = True
+				tag = "intent-filter"
+				for intent_filter in intent_filters:
+					# exported due to intent filter (which may limit the exposed attack paths
+					# Now check if it's a browsable activity. These can be reached via links like on webpages,	
+					# so vulnerabilities might be easier to exploit
+					categories = intent_filter.getElementsByTagName('category')
+					if (categories != []):
+						for category in categories:
+							if (str(category.attributes['android:name'].value) == "android.intent.category.BROWSABLE"):
+								tag = "browsable"
+								break
+			else:
+				if (export_val == "true"): # if there are no intent filters but the activity was exported explicitly, we do want to report it
+					is_exported = True
+					tag = "exported"
+				
+		# final verdict for this activity
+		if (is_exported):
+			printString("[Alias] " + item.attributes['android:name'].value + " " + str(is_exported) + " " + tag)
+			saveItem(db, 'aliases', packagename, item.attributes['android:name'].value, tag, current_time)
+
+
+
 
 
 
@@ -353,6 +399,10 @@ printString('\n-- Exported Components --')
 # activities
 printString('')
 getActivities(xmldoc, conn)
+
+# activity-alias
+printString('')
+getAliases(xmldoc, conn)
 
 # providers
 printString('')
