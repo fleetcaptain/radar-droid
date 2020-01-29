@@ -40,7 +40,8 @@ def initDB(db):
 	db.execute('''CREATE TABLE services (app text, service text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE webviews (app text, webview text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE broadcasters (app text, broadcaster text, tag text, first_seen text)''')
-	db.execute('''CREATE TABLE jsbridges (app text, item text, tag text, first_seen text)''')
+	db.execute('''CREATE TABLE servers (app text, item text, tag text, first_seen text)''')
+	db.execute('''CREATE TABLE jsbridges (app text, item text, tag text, first_seen text)''')	
 	db.execute('''CREATE TABLE permissions (app text, permission text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE appinfo (app text, sdk integer, backup text, debug text)''')
 	db.commit()
@@ -462,6 +463,15 @@ if (java != None):
 				code_search.append('Detected Javascript Bridge in ' + item_id)
 				saveItem(conn, 'jsbridges', packagename, item_id, "", current_time)
 
+		if ('new ServerSocket(' in filedata):
+			if (check_all == False):
+				if (packagename in item_id):
+					code_search.append('[High] Detected ServerSocket in ' + item_id)
+					saveItem(conn, 'servers', packagename, item_id, "package-match", current_time)
+			else:
+				code_search.append('Detected ServerSocket in ' + item_id)
+				saveItem(conn, 'servers', packagename, item_id, "", current_time)
+
 
 
 		for item in runtime_broadcast:
@@ -472,7 +482,7 @@ if (java != None):
 			else:
 				if (check_all): # only return low confidence (i.e. probably local broadcast) items if user did not specify only high confidence items
 					code_search.append('Detected ' + item + ' in ' + item_id)
-					saveItem(conn, 'broadcaster', packagename, item_id, "", current_time)
+					saveItem(conn, 'broadcasters', packagename, item_id, "", current_time)
 code_search.sort()
 for result in code_search:
 	printString(result)
