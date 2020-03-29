@@ -15,7 +15,7 @@ from optparse import OptionParser
 
 rules = {}
 activities = {}
-blacklist = ['.jpg', '.png', '.gif', '.tiff']
+blacklist = ['.jpg', '.png', '.gif', '.tiff', '.webp', '.dex', '.matc', '.kotlin_module']
 flagged_permissions = ["android.permission.WRITE_EXTERNAL_STORAGE"]
 
 #runtime_elements = ['onStartCommand(', 'handleMessage(', 'new WebView(', 'getExternalCacheDir()', 'getExternalFilesDir()', 'new BroadcastReceiver()', 'extends BroadcastReceiver', '@JavascriptInterface']
@@ -284,8 +284,39 @@ def getAliases(xmldocument, db):
 			saveItem(db, 'aliases', packagename, item.attributes['android:name'].value, tag, current_time)
 
 
-
-
+def scanRegex(directory, rules):
+	for root, dirs, files in os.walk(directory, topdown=False):
+		for name in files:
+			skip = False
+			filepath = os.path.join(root, name)
+			for item in blacklist:
+				if item in (filepath[-5:]):
+					skip = True
+			if (skip == False):
+				#open file and run regex
+				filedata = ""
+				didRead = True
+				f = open(filepath, 'r')
+				try:
+					filedata = f.read()
+				except:
+					# cannot read file
+					if (debug):
+						printString("[debug] Error could not read file " + filepath)
+					didRead = False
+				f.close()
+				#if (debug):
+				#	printString("[debug] Read file: " + filepath
+				if didRead:
+					for key in rules:
+						found_strings = rules[key].findall(filedata)
+						if (found_strings):
+							for found_string in found_strings:
+								try:
+									printString('Detected ' + key + ' in ' + filepath + ', value: ' + found_string)
+								except:
+									# encode/decode error... just tell the user we found something
+									printString('Detected ' + key + ' in ' + filepath + ', value: <encoding error>')
 
 
 
@@ -294,8 +325,9 @@ def getAliases(xmldocument, db):
 
 # Start main code
 parser = OptionParser('Usage: core.py -m <path to AndroidManifest.xml> -j <path to decompiled .java source code> -o (output file) --debug --secrets --high-confidence')
-parser.add_option('-m', '--manifest', dest="manifest", help="AndroidManifest.xml file to analyze")
-parser.add_option("-j", "--java", dest="java", help="directory with the app's decompiled .java source files")
+parser.add_option('-r', '--resources', dest="resources", help="Resources directory")
+parser.add_option('-m', '--manifest', dest="manifest", help="Path to AndroidManifest.xml")
+parser.add_option("-s", "--source", dest="source", help="directory with the app's decompiled .java source files")
 parser.add_option("--high-confidence", action="store_true", dest="confidence", help="do not return low quality hits in source code search (ex: skip broadcasters in files with LocalBroadcastManager imported")
 parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
 parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
@@ -305,28 +337,34 @@ parser.add_option("--secrets", dest="scan_secrets", help="JSON regex file contai
 out_file = options.out_file
 debug = options.debug
 scan_secrets = options.scan_secrets
-java = options.java
+java = options.source
 confidence = options.confidence
+resources = options.resources
 manifest = options.manifest
 
 current_time = str(time.time())
 
 check_all = True
 
-# input - path to AndroidManifest.xml
-if (manifest == None):
-	printString('You must specify an input manifest file')
+# check if we have manifest, resources, or both
+if (manifest == None and resources == None):
+	printString('You must specify an input manifest file (-m) or resources directory (-r)')
 	printString(parser.usage)
 	exit()
+elif (manifest == None and resources != None):
+	# use resources
+	# override manifest variable so we can keep using it
+	manifest = resources + "/AndroidManifest.xml"
 
 if (scan_secrets != None):
 	# read in regex rules
 	rule_file = open(scan_secrets, 'r')
-	rules = json.loads(rule_file.read())
-	for rule in rules:
+	rule_file_data = json.loads(rule_file.read())
+	enabled_rules = rule_file_data["enabled"]
+	for rule in enabled_rules:
 		if (debug):
-			printString('[debug] Regex rule: ' + rule + " " + rules[rule])
-		rules[rule] = re.compile(rules[rule])
+			printString('[debug] Regex rule: ' + rule + " " + enabled_rules[rule])
+		rules[rule] = re.compile(enabled_rules[rule])
 	rule_file.close()
 
 if (confidence):
@@ -341,6 +379,12 @@ if (not os.path.exists(db_file)):
 		printString("Created DB")
 else:
 	conn = sqlite3.connect(db_file)
+
+
+
+#
+# BEGIN ANALYSIS CODE
+#
 
 # parse manifest
 xmldoc = minidom.parse(manifest)
@@ -479,7 +523,7 @@ if (java != None):
 				if (packagename in item_id):
 					code_search.append('[High] Detected ' + item + ' in ' + item_id)
 					saveItem(conn, 'broadcasters', packagename, item_id, "package-match", current_time)
-			else:
+			elif (item in filedata):
 				if (check_all): # only return low confidence (i.e. probably local broadcast) items if user did not specify only high confidence items
 					code_search.append('Detected ' + item + ' in ' + item_id)
 					saveItem(conn, 'broadcasters', packagename, item_id, "", current_time)
@@ -495,33 +539,9 @@ for result in code_search:
 if (scan_secrets):
 	#printString('-- Results for ' + app_folder + ' --'
 	printString('\n-- Sensitive values --')
-
-	for root, dirs, files in os.walk(java, topdown=False):
-		for name in files:
-			skip = False
-			filepath = os.path.join(root, name)
-			for item in blacklist:
-				if item in (filepath[-5:]):
-					skip = True
-			if (skip == False):
-				#open file and run regex
-				f = open(filepath, 'r')
-				filedata = f.read()
-				f.close()
-				#if (debug):
-				#	printString("[debug] Read file: " + filepath
-				for key in rules:
-					found_strings = rules[key].findall(filedata)
-					if (found_strings):
-						for found_string in found_strings:
-							try:
-								printString('Detected ' + key + ' in ' + name + ', value: ' + found_string)
-							except:
-								# encode/decode error... just tell the user we found something
-								printString('Detected ' + key + ' in ' + name + ', value: <encoding error>')
-					
-						
-		
+	#scanRegex(java, rules)
+	if (resources != None):
+		scanRegex(resources, rules)
 	printString('')
 
 conn.close()
