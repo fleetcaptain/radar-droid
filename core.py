@@ -324,10 +324,9 @@ def scanRegex(directory, rules):
 
 
 # Start main code
-parser = OptionParser('Usage: core.py -m <path to AndroidManifest.xml> -j <path to decompiled .java source code> -o (output file) --debug --secrets --high-confidence')
-parser.add_option('-r', '--resources', dest="resources", help="Resources directory")
+parser = OptionParser('Usage: core.py -m <path to AndroidManifest.xml> -j <path to jadx decompiled app output directory> -o (output file) --debug --secrets --high-confidence')
+parser.add_option('-j', '--jadx', dest="jadxdir", help="Directory with jadx decompiled app output")
 parser.add_option('-m', '--manifest', dest="manifest", help="Path to AndroidManifest.xml")
-parser.add_option("-s", "--source", dest="source", help="directory with the app's decompiled .java source files")
 parser.add_option("--high-confidence", action="store_true", dest="confidence", help="do not return low quality hits in source code search (ex: skip broadcasters in files with LocalBroadcastManager imported")
 parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
 parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
@@ -337,24 +336,25 @@ parser.add_option("--secrets", dest="scan_secrets", help="JSON regex file contai
 out_file = options.out_file
 debug = options.debug
 scan_secrets = options.scan_secrets
-java = options.source
+jadxdir = options.jadxdir
 confidence = options.confidence
-resources = options.resources
 manifest = options.manifest
 
 current_time = str(time.time())
 
 check_all = True
+manifest_only = True
 
 # check if we have manifest, resources, or both
-if (manifest == None and resources == None):
-	printString('You must specify an input manifest file (-m) or resources directory (-r)')
+if (manifest == None and jadxdir == None):
+	printString('You must specify an input manifest file (-m) or jadx app directory (-j)')
 	printString(parser.usage)
 	exit()
-elif (manifest == None and resources != None):
-	# use resources
+elif (manifest == None):
+	# use jadx dir and conduct full code analysis
 	# override manifest variable so we can keep using it
-	manifest = resources + "/AndroidManifest.xml"
+	manifest = jadxdir + "resources/AndroidManifest.xml"
+
 
 if (scan_secrets != None):
 	# read in regex rules
@@ -465,7 +465,8 @@ getReceivers(xmldoc, conn)
 code_search = []
 
 # Now let's hunt through decompiled code :)
-if (java != None):
+if (jadxdir != None):
+	java = jadxdir + "sources/"
 	if (debug):
 		printString("Analzying java source code at " + java)
 	file_list = getAllFiles(java)
@@ -489,7 +490,7 @@ if (java != None):
 				code_search.append('Detected WebView in ' + item_id)
 				saveItem(conn, 'webviews', packagename, item_id, "", current_time)
 
-		if ('new BroadcastReceiver()' in filedata or 'extends BroadcastReceiver' in filedata):
+		if ('registerReceiver()' in filedata):
 			if (check_all == False):
 				if (packagename in item_id):
 					code_search.append('[High] Detected receiver in ' + item_id)
@@ -536,12 +537,11 @@ for result in code_search:
 ########################
 # REGEX
 #
-if (scan_secrets):
+if (scan_secrets and jadxdir != None):
 	#printString('-- Results for ' + app_folder + ' --'
 	printString('\n-- Sensitive values --')
 	#scanRegex(java, rules)
-	if (resources != None):
-		scanRegex(resources, rules)
+	scanRegex(jadxdir, rules)
 	printString('')
 
 conn.close()
