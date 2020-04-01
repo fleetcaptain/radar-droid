@@ -44,6 +44,7 @@ def initDB(db):
 	db.execute('''CREATE TABLE jsbridges (app text, item text, tag text, first_seen text)''')	
 	db.execute('''CREATE TABLE permissions (app text, permission text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE appinfo (app text, sdk integer, backup text, debug text)''')
+	db.execute('''CREATE TABLE firebase (app text, url text, tag text, first_seen text)''')
 	db.commit()
 
 
@@ -324,16 +325,16 @@ def scanRegex(directory, rules):
 
 
 # Start main code
-parser = OptionParser('Usage: core.py -m <path to AndroidManifest.xml> -j <path to jadx decompiled app output directory> -o (output file) --debug --secrets --high-confidence')
+parser = OptionParser('Usage: core.py -m <path to AndroidManifest.xml> -j <path to jadx decompiled app output directory> --debug --secrets --high-confidence')
 parser.add_option('-j', '--jadx', dest="jadxdir", help="Directory with jadx decompiled app output")
 parser.add_option('-m', '--manifest', dest="manifest", help="Path to AndroidManifest.xml")
-parser.add_option("--high-confidence", action="store_true", dest="confidence", help="do not return low quality hits in source code search (ex: skip broadcasters in files with LocalBroadcastManager imported")
-parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
+parser.add_option("--low-confidence", action="store_true", dest="confidence", help="look for low-quality hits, such as broadcasters in files with LocalBroadcastManager imported. High false positive rate")
+#parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
 parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
 parser.add_option("--secrets", dest="scan_secrets", help="JSON regex file containing search terms for API keys, tokens, and other sensitive data")
 
 (options, args) = parser.parse_args()
-out_file = options.out_file
+#out_file = options.out_file
 debug = options.debug
 scan_secrets = options.scan_secrets
 jadxdir = options.jadxdir
@@ -342,7 +343,7 @@ manifest = options.manifest
 
 current_time = str(time.time())
 
-check_all = True
+check_all = False
 manifest_only = True
 
 # check if we have manifest, resources, or both
@@ -368,7 +369,7 @@ if (scan_secrets != None):
 	rule_file.close()
 
 if (confidence):
-	check_all = False
+	check_all = True
 
 db_file = 'apps.db'
 if (not os.path.exists(db_file)):
@@ -438,6 +439,18 @@ for permission in permissions:
 		saveItem(conn, "permissions", packagename, p_name, "", current_time)
 
 
+# Firebase URL
+stringsdoc = minidom.parse(jadxdir + "/resources/res/values/strings.xml")
+res = stringsdoc.getElementsByTagName('resources')[0]
+items = res.getElementsByTagName('string')
+for item in items:
+	s_name = str(item.attributes['name'].value)
+	if (s_name == "firebase_database_url"):
+		url =  str(item.firstChild.data)
+		printString("Firebase: " + url)
+		saveItem(conn, "firebase", packagename, url, "", current_time)
+
+
 # All exported components that the manifest reveals
 printString('\n-- Exported Components --')
 
@@ -469,6 +482,7 @@ if (jadxdir != None):
 	java = jadxdir + "sources/"
 	if (debug):
 		printString("Analzying java source code at " + java)
+		printString("check_all=" + str(check_all))
 	file_list = getAllFiles(java)
 	for fi in file_list:
 		fi_name = fi.replace(java, '')
