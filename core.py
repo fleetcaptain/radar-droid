@@ -32,7 +32,7 @@ packagename = None
 ## Database related methods
 def initDB(db):
 	db.execute('''CREATE TABLE activities (app text, activity text, tag text, first_seen text)''')
-	db.execute('''CREATE TABLE aliases (app text, alias text, tag text, first_seen text)''')
+	db.execute('''CREATE TABLE aliases (app text, alias text, target text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE providers (app text, provider text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE receivers (app text, receiver text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE receiver_actions (app text, receiver text, action text)''')
@@ -41,6 +41,7 @@ def initDB(db):
 	db.execute('''CREATE TABLE webviews (app text, webview text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE broadcasters (app text, broadcaster text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE servers (app text, item text, tag text, first_seen text)''')
+	db.execute('''CREATE TABLE loopback (app text, item text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE jsbridges (app text, item text, tag text, first_seen text)''')	
 	db.execute('''CREATE TABLE permissions (app text, permission text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE appinfo (app text, sdk integer, backup text, debug text)''')
@@ -53,6 +54,10 @@ def saveItem(db, table, app, item, tag, first_seen):
 	db.execute("INSERT INTO " + table + " VALUES ('" + app + "','" + item + "','" + tag + "','" + first_seen + "')")
 	db.commit()
 
+# save general DB item
+def saveAlias(db, table, app, item, target, tag, first_seen):
+	db.execute("INSERT INTO " + table + " VALUES ('" + app + "','" + item + "','" + target + "','" + tag + "','" + first_seen + "')")
+	db.commit()
 
 # save general app info
 def saveAppInfo(db, app, sdk, backup, debug):
@@ -281,8 +286,10 @@ def getAliases(xmldocument, db):
 				
 		# final verdict for this activity
 		if (is_exported):
-			printString("[Alias] " + item.attributes['android:name'].value + " " + str(is_exported) + " " + tag)
-			saveItem(db, 'aliases', packagename, item.attributes['android:name'].value, tag, current_time)
+			# get the target
+			target = str(item.attributes['android:targetActivity'].value)
+			printString("[Alias] " + item.attributes['android:name'].value + " " + str(is_exported) + " " + tag + '\n\tTarget: ' + target)
+			saveAlias(db, 'aliases', packagename, item.attributes['android:name'].value, target, tag, current_time)
 
 
 def scanRegex(directory, rules):
@@ -329,12 +336,14 @@ parser = OptionParser('Usage: core.py -m <path to AndroidManifest.xml> -j <path 
 parser.add_option('-j', '--jadx', dest="jadxdir", help="Directory with jadx decompiled app output")
 parser.add_option('-m', '--manifest', dest="manifest", help="Path to AndroidManifest.xml")
 parser.add_option("--low-confidence", action="store_true", dest="confidence", help="look for low-quality hits, such as broadcasters in files with LocalBroadcastManager imported. High false positive rate")
+parser.add_option("-q", "--quiet", action="store_true", dest="quiet", help="suppress printed output")
 #parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
 parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
 parser.add_option("--secrets", dest="scan_secrets", help="JSON regex file containing search terms for API keys, tokens, and other sensitive data")
 
 (options, args) = parser.parse_args()
 #out_file = options.out_file
+quiet = options.quiet
 debug = options.debug
 scan_secrets = options.scan_secrets
 jadxdir = options.jadxdir
@@ -370,6 +379,8 @@ if (scan_secrets != None):
 
 if (confidence):
 	check_all = True
+if (quiet):
+	silent = True
 
 db_file = 'apps.db'
 if (not os.path.exists(db_file)):
@@ -405,8 +416,6 @@ except:
 	target_api = '-1'
 
 printString("Target API: " + str(target_api))
-if (target_api < 17):
-	printString("Target API is old, check manifest manually for further vulnerabilities")
 
 # backup
 application = xmldoc.getElementsByTagName('application')
@@ -531,6 +540,14 @@ if (jadxdir != None):
 				code_search.append('Detected ServerSocket in ' + item_id)
 				saveItem(conn, 'servers', packagename, item_id, "", current_time)
 
+		if ('127.0.0.1' in filedata):
+			if (check_all == False):
+				if (packagename in item_id):
+					code_search.append('[High] Detected 127.0.0.1 in ' + item_id)
+					saveItem(conn, 'loopback', packagename, item_id, "package-match", current_time)
+			else:
+				code_search.append('Detected 127.0.0.1 in ' + item_id)
+				saveItem(conn, 'loopback', packagename, item_id, "", current_time)
 
 
 		for item in runtime_broadcast:
