@@ -34,10 +34,10 @@ def initDB(db):
 	db.execute('''CREATE TABLE activities (app text, activity text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE aliases (app text, alias text, target text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE providers (app text, provider text, tag text, first_seen text)''')
-	db.execute('''CREATE TABLE receivers (app text, receiver text, tag text, first_seen text)''')
+	db.execute('''CREATE TABLE receivers (app text, receiver text, permission text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE receiver_actions (app text, receiver text, action text)''')
 	db.execute('''CREATE TABLE runtime_receivers (app text, receiver text, tag text, first_seen text)''')
-	db.execute('''CREATE TABLE services (app text, service text, tag text, first_seen text)''')
+	db.execute('''CREATE TABLE services (app text, service text, permission text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE webviews (app text, webview text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE broadcasters (app text, broadcaster text, tag text, first_seen text)''')
 	db.execute('''CREATE TABLE servers (app text, item text, tag text, first_seen text)''')
@@ -52,6 +52,10 @@ def initDB(db):
 # save general DB item
 def saveItem(db, table, app, item, tag, first_seen):
 	db.execute("INSERT INTO " + table + " VALUES ('" + app + "','" + item + "','" + tag + "','" + first_seen + "')")
+	db.commit()
+
+def saveItemWithPermission(db, table, app, item, permission, tag, first_seen):
+	db.execute("INSERT INTO " + table + " VALUES ('" + app + "','" + item + "','" + permission + "','" + tag + "','" + first_seen + "')")
 	db.commit()
 
 # save general DB item
@@ -142,11 +146,19 @@ def getServices(xmldocument, db):
 			is_exported = True
 		else:
 			is_exported = False
-				
+		
+		# check for permissions
+		permission = ""
+		try:
+			permission = str(item.attributes['android:permission'].value)
+		except:
+			# no permissions required?
+			permission = "N/A"
 		# final verdict for this service
 		if (is_exported):
 			printString("[Service] " + str(item.attributes['android:name'].value))
-			saveItem(db, 'services', packagename, item.attributes['android:name'].value, "exported", current_time)
+			printString("\tPermission: " + permission)
+			saveItemWithPermission(db, 'services', packagename, item.attributes['android:name'].value, permission, "exported", current_time)
 			
 
 
@@ -181,7 +193,7 @@ def getReceivers(xmldocument, db):
 						permission = str(item.attributes['android:permission'].value)
 					except:
 						# no permissions required?
-						permission = "none"
+						permission = "N/A"
 					#printString(item.attributes['android:name'].value + " " + permission
 					actions = intent_filter.getElementsByTagName('action')
 
@@ -194,7 +206,7 @@ def getReceivers(xmldocument, db):
 		if (is_exported):
 			printString("[Receiver] " + str(item.attributes['android:name'].value))
 			printString("\tPermission: " + permission)
-			saveItem(db, 'receivers', packagename, str(item.attributes['android:name'].value), "intent-filter", current_time)
+			saveItemWithPermission(db, 'receivers', packagename, str(item.attributes['android:name'].value), permission, "intent-filter", current_time)
 			for action in action_list:
 					saveAction(db, 'receiver_actions', packagename, str(item.attributes['android:name'].value), action)
 		else:
@@ -332,17 +344,17 @@ def scanRegex(directory, rules):
 
 
 # Start main code
-parser = OptionParser('Usage: core.py -m <path to AndroidManifest.xml> -j <path to jadx decompiled app output directory> --debug --secrets --high-confidence')
+parser = OptionParser('Usage: core.py -m <path to AndroidManifest.xml> -j <path to jadx decompiled app output directory> -f (/path/to/output.db) --debug --secrets --low-confidence')
 parser.add_option('-j', '--jadx', dest="jadxdir", help="Directory with jadx decompiled app output")
 parser.add_option('-m', '--manifest', dest="manifest", help="Path to AndroidManifest.xml")
 parser.add_option("--low-confidence", action="store_true", dest="confidence", help="look for low-quality hits, such as broadcasters in files with LocalBroadcastManager imported. High false positive rate")
 parser.add_option("-q", "--quiet", action="store_true", dest="quiet", help="suppress printed output")
-#parser.add_option("-o", "--output", dest="out_file", help="Write results to specified output file")
+parser.add_option("-o", "--output-file", dest="out_file", help="Write sqlite database to specified file. Default is apps.db in current directory.")
 parser.add_option("--debug", dest="debug", action="store_true", help="Enable verbose debug output")
 parser.add_option("--secrets", dest="scan_secrets", help="JSON regex file containing search terms for API keys, tokens, and other sensitive data")
 
 (options, args) = parser.parse_args()
-#out_file = options.out_file
+out_file = options.out_file
 quiet = options.quiet
 debug = options.debug
 scan_secrets = options.scan_secrets
@@ -382,7 +394,11 @@ if (confidence):
 if (quiet):
 	silent = True
 
+# setup database file - default to apps.db
 db_file = 'apps.db'
+if (out_file != None):
+	db_file = out_file
+
 if (not os.path.exists(db_file)):
 	# init tables if DB does not already exist
 	conn = sqlite3.connect(db_file)
@@ -501,53 +517,53 @@ if (jadxdir != None):
 		item_id = fi_name.replace('/', '.')
 		
 		if (' WebView' in filedata):
-			#print 'here'
-			if (check_all == False):
-				#print packagename
-				#print item_id
-				if (packagename in item_id):
-					code_search.append('[High] Detected WebView in ' + item_id)
-					saveItem(conn, 'webviews', packagename, item_id, "package-match", current_time)
-			else:
-				#print 'check_all false'
+			if (packagename in item_id):
+				code_search.append('[High] Detected WebView in ' + item_id)
+				saveItem(conn, 'webviews', packagename, item_id, "package-match", current_time)
+			elif (check_all):
 				code_search.append('Detected WebView in ' + item_id)
 				saveItem(conn, 'webviews', packagename, item_id, "", current_time)
 
+
 		if ('registerReceiver()' in filedata):
-			if (check_all == False):
-				if (packagename in item_id):
-					code_search.append('[High] Detected receiver in ' + item_id)
-					saveItem(conn, 'runtime_receivers', packagename, item_id, "package-match", current_time)
-			else:
+			if (packagename in item_id):
+				code_search.append('[High] Detected receiver in ' + item_id)
+				saveItem(conn, 'runtime_receivers', packagename, item_id, "package-match", current_time)
+			elif (check_all):
 				code_search.append('Detected receiver in ' + item_id)
 				saveItem(conn, 'runtime_receivers', packagename, item_id, "", current_time)
 
 		if ('@JavascriptInterface' in filedata):
-			if (check_all == False):
-				if (packagename in item_id):
-					code_search.append('[High] Detected Javascript Bridge in ' + item_id)
-					saveItem(conn, 'jsbridges', packagename, item_id, "package-match", current_time)
-			else:
+			if (packagename in item_id):
+				code_search.append('[High] Detected Javascript Bridge in ' + item_id)
+				saveItem(conn, 'jsbridges', packagename, item_id, "package-match", current_time)
+			elif (check_all):
 				code_search.append('Detected Javascript Bridge in ' + item_id)
 				saveItem(conn, 'jsbridges', packagename, item_id, "", current_time)
 
 		if ('new ServerSocket(' in filedata):
-			if (check_all == False):
-				if (packagename in item_id):
-					code_search.append('[High] Detected ServerSocket in ' + item_id)
-					saveItem(conn, 'servers', packagename, item_id, "package-match", current_time)
-			else:
+			if (packagename in item_id):
+				code_search.append('[High] Detected ServerSocket in ' + item_id)
+				saveItem(conn, 'servers', packagename, item_id, "package-match", current_time)
+			elif (check_all):
 				code_search.append('Detected ServerSocket in ' + item_id)
 				saveItem(conn, 'servers', packagename, item_id, "", current_time)
 
 		if ('127.0.0.1' in filedata):
-			if (check_all == False):
-				if (packagename in item_id):
-					code_search.append('[High] Detected 127.0.0.1 in ' + item_id)
-					saveItem(conn, 'loopback', packagename, item_id, "package-match", current_time)
-			else:
+			if (packagename in item_id):
+				code_search.append('[High] Detected 127.0.0.1 in ' + item_id)
+				saveItem(conn, 'loopback', packagename, item_id, "package-match", current_time)
+			elif (check_all):
 				code_search.append('Detected 127.0.0.1 in ' + item_id)
 				saveItem(conn, 'loopback', packagename, item_id, "", current_time)
+
+		if ('.firebase.io' in filedata):
+			if (packagename in item_id):
+				code_search.append('[High] Detected firebase URL in ' + item_id)
+				saveItem(conn, 'firebase', packagename, item_id, "package-match", current_time)
+			elif (check_all):
+				code_search.append('Detected firebase URL in ' + item_id)
+				saveItem(conn, 'firebase', packagename, item_id, "", current_time)
 
 
 		for item in runtime_broadcast:
