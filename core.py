@@ -571,8 +571,8 @@ if (jadxdir != None):
 				if (packagename in item_id):
 					code_search.append('[High] Detected ' + item + ' in ' + item_id)
 					saveItem(conn, 'broadcasters', packagename, item_id, "package-match", current_time)
-			elif (item in filedata):
-				if (check_all): # only return low confidence (i.e. probably local broadcast) items if user did not specify only high confidence items
+			elif (item in filedata and "LocalBroadcastManager" not in filedata):
+				if (check_all): # only return low confidence items if user did not specify only high confidence items
 					code_search.append('Detected ' + item + ' in ' + item_id)
 					saveItem(conn, 'broadcasters', packagename, item_id, "", current_time)
 code_search.sort()
